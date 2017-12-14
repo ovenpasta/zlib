@@ -1,6 +1,6 @@
 /* gzlib.c -- zlib functions common to reading and writing gzip files
  * Copyright (C) 2004-2017 Mark Adler
- * For conditions of distribution and use, see copyright notice in zlib.h
+ * For conditions of distribution and use, see copyright notice in zlib.h * 
  */
 
 #include "gzguts.h"
@@ -14,6 +14,30 @@
 #  define LSEEK lseek
 #endif
 #endif
+
+local off_t gz_lseek(state,offset,whence)
+    gz_statep state;
+    off_t offset;
+    int whence;
+{
+    if (state->mem)
+      {
+      switch (whence){
+        case SEEK_END:
+          state->mem->pos=state->mem->sz+offset;
+          break;
+        case SEEK_SET:
+          state->mem->pos=offset;
+          break;
+        case SEEK_CUR:
+          state->mem->pos+=offset;
+          break;
+      }
+      return state->mem->pos;
+    }
+    else
+      return LSEEK(state->fd,offset,whence);
+}
 
 /* Local functions */
 local void gz_reset OF((gz_statep));
@@ -114,6 +138,7 @@ local gzFile gz_open(path, fd, mode)
     state->size = 0;            /* no buffers allocated yet */
     state->want = GZBUFSIZE;    /* requested buffer size */
     state->msg = NULL;          /* no error message yet */
+    state->mem=NULL;
 
     /* interpret mode */
     state->mode = GZ_NONE;
@@ -312,6 +337,114 @@ gzFile ZEXPORT gzopen_w(path, mode)
 }
 #endif
 
+/* Open a gzip file from memory*/
+ZEXPORT gzFile gzmemopen(mem,sz,mode)
+    const void *mem;
+    z_size_t sz;
+    const char *mode;
+{
+    gz_statep state;
+
+    /* allocate gzFile structure to return */
+    state = (gz_statep)malloc(sizeof(gz_state));
+    if (state == NULL)
+        return NULL;
+    state->size = 0;            /* no buffers allocated yet */
+    state->want = GZBUFSIZE;    /* requested buffer size */
+    state->msg = NULL;          /* no error message yet */
+
+    /* interpret mode */
+    state->mode = GZ_NONE;
+    state->level = Z_DEFAULT_COMPRESSION;
+    state->strategy = Z_DEFAULT_STRATEGY;
+    state->direct = 0;
+    while (*mode) {
+        if (*mode >= '0' && *mode <= '9')
+            state->level = *mode - '0';
+        else
+            switch (*mode) {
+            case 'r':
+                state->mode = GZ_READ;
+                break;
+#ifndef NO_GZCOMPRESS
+            case 'w':
+                state->mode = GZ_WRITE;
+                break;
+            case 'a':
+                state->mode = GZ_APPEND;
+                break;
+#endif
+            case '+':       /* can't read and write at the same time */
+                free(state);
+                return NULL;
+            case 'f':
+                state->strategy = Z_FILTERED;
+                break;
+            case 'h':
+                state->strategy = Z_HUFFMAN_ONLY;
+                break;
+            case 'R':
+                state->strategy = Z_RLE;
+                break;
+            case 'F':
+                state->strategy = Z_FIXED;
+                break;
+            case 'T':
+                state->direct = 1;
+                break;
+            default:        /* could consider as an error, but just ignore */
+                ;
+            }
+        mode++;
+    }
+
+    /* must provide an "r", "w", or "a" */
+    if (state->mode == GZ_NONE) {
+        free(state);
+        return NULL;
+    }
+
+    /* can't force transparent read */
+    if (state->mode == GZ_READ) {
+        if (state->direct) {
+            free(state);
+            return NULL;
+        }
+        state->direct = 1;      /* for empty file */
+    }
+
+    state->path = (char *)malloc( 1);
+    if (state->path == NULL) {
+        free(state);
+        return NULL;
+    }
+  state->path[0]=0;
+
+  state->mem=malloc(sizeof (gz_in_memory));
+  state->mem->pos=0;
+  state->mem->sz=sz;
+  state->mem->mem=mem;
+  
+    state->fd = -1;
+    if (state->mode == GZ_APPEND) {
+      state->mem->pos=state->mem->sz;
+      state->mode = GZ_WRITE;         /* simplify later checks */
+    }
+
+    /* save the current position for rewinding (only if reading) */
+    if (state->mode == GZ_READ) {
+      state->start = gz_lseek(state, 0, SEEK_CUR);
+      if (state->start == -1) state->start = 0;
+    }
+
+    /* initialize stream */
+    gz_reset(state);
+
+    /* return stream */
+    return (gzFile)state;
+}
+
+
 /* -- see zlib.h -- */
 int ZEXPORT gzbuffer(file, size)
     gzFile file;
@@ -356,7 +489,7 @@ int ZEXPORT gzrewind(file)
         return -1;
 
     /* back up and start over */
-    if (LSEEK(state->fd, state->start, SEEK_SET) == -1)
+    if (gz_lseek(state, state->start, SEEK_SET) == -1)
         return -1;
     gz_reset(state);
     return 0;
@@ -397,7 +530,7 @@ z_off64_t ZEXPORT gzseek64(file, offset, whence)
     /* if within raw area while reading, just go there */
     if (state->mode == GZ_READ && state->how == COPY &&
             state->x.pos + offset >= 0) {
-        ret = LSEEK(state->fd, offset - state->x.have, SEEK_CUR);
+        ret = gz_lseek(state, offset - state->x.have, SEEK_CUR);
         if (ret == -1)
             return -1;
         state->x.have = 0;
@@ -493,7 +626,7 @@ z_off64_t ZEXPORT gzoffset64(file)
         return -1;
 
     /* compute and return effective offset in file */
-    offset = LSEEK(state->fd, 0, SEEK_CUR);
+    offset = gz_lseek(state, 0, SEEK_CUR);
     if (offset == -1)
         return -1;
     if (state->mode == GZ_READ)             /* reading */

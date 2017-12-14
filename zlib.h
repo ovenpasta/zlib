@@ -1360,6 +1360,8 @@ ZEXTERN gzFile ZEXPORT gzdopen OF((int fd, const char *mode));
    will not detect if fd is invalid (unless fd is -1).
 */
 
+ZEXTERN gzFile ZEXPORT gzmemopen OF((const void *mem, z_size_t sz,const char *mode));
+  
 ZEXTERN int ZEXPORT gzbuffer OF((gzFile file, unsigned size));
 /*
      Set the internal buffer size used by this library's functions.  The

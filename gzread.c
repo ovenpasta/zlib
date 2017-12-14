@@ -14,6 +14,25 @@ local int gz_fetch OF((gz_statep));
 local int gz_skip OF((gz_statep, z_off64_t));
 local z_size_t gz_read OF((gz_statep, voidp, z_size_t));
 
+local int readx(state,buf,len)
+     gz_statep state;
+     unsigned char* buf;
+     unsigned len;
+{
+  if (state->mem)
+    {
+      if (len>state->mem->sz-state->mem->pos)
+	len=state->mem->sz-state->mem->pos;
+      if (len<0)
+	return 0;
+      memcpy(buf,state->mem->mem+state->mem->pos,len);
+      state->mem->pos+=len;
+      return len;
+    }
+
+  return read(state->fd,buf,len);
+}
+
 /* Use read() to load a buffer -- return -1 on error, otherwise 0.  Read from
    state->fd, and update state->eof, state->err, and state->msg as appropriate.
    This function needs to loop on read(), since read() is not guaranteed to
@@ -32,7 +51,7 @@ local int gz_load(state, buf, len, have)
         get = len - *have;
         if (get > max)
             get = max;
-        ret = read(state->fd, buf + *have, get);
+        ret = readx(state, buf + *have, get);
         if (ret <= 0)
             break;
         *have += (unsigned)ret;

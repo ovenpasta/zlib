@@ -166,6 +166,12 @@
 #define COPY 1      /* copy input directly */
 #define GZIP 2      /* decompress a gzip stream */
 
+typedef struct {
+    int sz;
+    int pos;
+    unsigned char *mem;
+} gz_in_memory;
+
 /* internal gzip file state data structure */
 typedef struct {
         /* exposed contents for gzgetc() macro */
@@ -198,7 +204,9 @@ typedef struct {
     char *msg;              /* error message */
         /* zlib inflate or deflate stream */
     z_stream strm;          /* stream structure in-place (not a pointer) */
+    gz_in_memory *mem;      /* in memory file */
 } gz_state;
+
 typedef gz_state FAR *gz_statep;
 
 /* shared functions */
